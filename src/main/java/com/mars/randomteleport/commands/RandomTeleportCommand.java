@@ -13,6 +13,10 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.Message;
+import com.hypixel.hytale.protocol.packets.player.ClientTeleport;
+import com.hypixel.hytale.protocol.ModelTransform;
+import com.hypixel.hytale.protocol.Position;
+import com.hypixel.hytale.protocol.Direction;
 import org.checkerframework.checker.nullness.compatqual.NonNullDecl;
 
 import java.util.HashMap;
@@ -93,8 +97,10 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
                     double randomX = Math.cos(angle) * distance;
                     double randomZ = Math.sin(angle) * distance;
 
-                    // Get ground level at target location (using default for now)
-                    double teleportY = 100.0;
+                    // Get ground level at target location
+                    // TODO: Implement proper ground finding once ChunkIndex/HeightMap API is
+                    // confirmed
+                    double teleportY = 85.0;
 
                     // Get current position component for teleportation
                     var transform = store.getComponent(ref, TransformComponent.getComponentType());
@@ -102,6 +108,15 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
                         // Teleport the player using Vector3d
                         Vector3d targetPosition = new Vector3d(randomX, teleportY, randomZ);
                         transform.teleportPosition(targetPosition);
+
+                        // Fix for vertical-only teleportation: Force client sync
+                        // Construct the packet using the correct ModelTransform API
+                        Position pos = new Position(targetPosition.x, targetPosition.y, targetPosition.z);
+                        Direction body = new Direction(0f, 0f, 0f);
+                        Direction look = new Direction(0f, 0f, 0f);
+                        ModelTransform modelTransform = new ModelTransform(pos, body, look);
+
+                        player.getPlayerConnection().write(new ClientTeleport((byte) 0, modelTransform, true));
                     }
 
                     // Set cooldown
