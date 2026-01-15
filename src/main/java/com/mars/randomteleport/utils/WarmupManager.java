@@ -8,6 +8,7 @@ import com.hypixel.hytale.server.core.modules.entity.component.TransformComponen
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.mars.randomteleport.config.RandomTeleportConfig;
 
 import java.util.Map;
 import java.util.UUID;
@@ -17,9 +18,11 @@ public class WarmupManager {
 
     private final ScheduledExecutorService scheduler;
     private final Map<UUID, WarmupData> activeWarmups = new ConcurrentHashMap<>();
+    private final RandomTeleportConfig config;
 
-    public WarmupManager() {
+    public WarmupManager(RandomTeleportConfig config) {
         this.scheduler = Executors.newScheduledThreadPool(1);
+        this.config = config;
     }
 
     public void shutdown() {
@@ -29,12 +32,8 @@ public class WarmupManager {
         scheduler.shutdown();
     }
 
-    public void startWarmup(PlayerRef playerData,
-            Ref<EntityStore> playerRef,
-            Store<EntityStore> store,
-            World world,
-            int warmupSeconds,
-            Runnable teleportAction) {
+    public void startWarmup(PlayerRef playerData, Ref<EntityStore> playerRef, Store<EntityStore> store,
+            World world, int warmupSeconds, Runnable teleportAction) {
 
         UUID playerId = playerData.getUuid();
         cancelWarmup(playerId);
@@ -45,15 +44,15 @@ public class WarmupManager {
         }
 
         TransformComponent transform = store.getComponent(playerRef, TransformComponent.getComponentType());
-        if (transform == null) {
+        if (transform == null)
             return;
-        }
-        Vector3d startPos = transform.getPosition();
 
-        playerData.sendMessage(Message.raw("Teleporting in " + warmupSeconds + " seconds... Don't move!"));
+        Vector3d startPos = transform.getPosition();
+        String msg = config.getMessageWarmupStart().replace("{seconds}", String.valueOf(warmupSeconds));
+        playerData.sendMessage(Message.raw(msg));
 
         WarmupData data = new WarmupData(playerData, playerRef, store, world,
-                startPos.x, startPos.y, startPos.z, 0.5); // 0.5 movement threshold
+                startPos.x, startPos.y, startPos.z, config.getMovementThreshold());
 
         ScheduledFuture<?> checkFuture = scheduler.scheduleAtFixedRate(() -> {
             checkMovement(playerId, data);
@@ -69,24 +68,19 @@ public class WarmupManager {
     }
 
     private void checkMovement(UUID playerId, WarmupData data) {
-        if (!activeWarmups.containsKey(playerId)) {
+        if (!activeWarmups.containsKey(playerId))
             return;
-        }
 
         try {
-            // Need to run on main thread to check component
             data.world.execute(() -> {
-                if (!activeWarmups.containsKey(playerId)) {
-                    // Double check inside lock/execution
+                if (!activeWarmups.containsKey(playerId))
                     return;
-                }
 
                 try {
                     TransformComponent transform = data.store.getComponent(data.playerRef,
                             TransformComponent.getComponentType());
-                    if (transform == null) {
+                    if (transform == null)
                         return;
-                    }
 
                     Vector3d currentPos = transform.getPosition();
                     double dx = currentPos.x - data.startX;
@@ -95,45 +89,36 @@ public class WarmupManager {
                     double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
                     if (distance > data.movementThreshold) {
-                        data.playerData.sendMessage(Message.raw("Teleportation cancelled! You moved too much."));
+                        data.playerData.sendMessage(Message.raw(config.getMessageMovedCancelled()));
                         cancelWarmup(playerId);
                     }
-                } catch (Exception e) {
-                    // Start position might be invalid if player left
+                } catch (Exception ignored) {
                 }
             });
-        } catch (Exception e) {
-            // World might be unloaded
+        } catch (Exception ignored) {
         }
     }
 
     private void completeWarmup(UUID playerId, Runnable teleportAction) {
         WarmupData data = activeWarmups.remove(playerId);
-        if (data == null) {
+        if (data == null)
             return;
-        }
 
-        if (data.checkFuture != null) {
+        if (data.checkFuture != null)
             data.checkFuture.cancel(false);
-        }
-
-        // Execute the teleport action
         teleportAction.run();
     }
 
     public void cancelWarmup(UUID playerId) {
         WarmupData data = activeWarmups.remove(playerId);
         if (data != null) {
-            if (data.checkFuture != null) {
+            if (data.checkFuture != null)
                 data.checkFuture.cancel(false);
-            }
-            if (data.teleportFuture != null) {
+            if (data.teleportFuture != null)
                 data.teleportFuture.cancel(false);
-            }
         }
     }
 
-    // Helper class to store warmup state
     private static class WarmupData {
         final PlayerRef playerData;
         final Ref<EntityStore> playerRef;

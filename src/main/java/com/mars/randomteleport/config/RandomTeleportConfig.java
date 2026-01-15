@@ -28,7 +28,6 @@ public class RandomTeleportConfig {
                     data = new ConfigData();
                 }
             } catch (Exception e) {
-                // Return default on error, backup might be good but keep it simple for now
                 data = new ConfigData();
             }
         } else {
@@ -70,11 +69,57 @@ public class RandomTeleportConfig {
         return data.movementThreshold;
     }
 
+    public int getMinHeight() {
+        return data.minHeight;
+    }
+
+    public int getMaxHeight() {
+        return data.maxHeight;
+    }
+
+    public String getMessageCooldown() {
+        return data.messageCooldown;
+    }
+
+    public String getMessageNoWorld() {
+        return data.messageNoWorld;
+    }
+
+    public String getMessageWarmupStart() {
+        return data.messageWarmupStart;
+    }
+
+    public String getMessageMovedCancelled() {
+        return data.messageMovedCancelled;
+    }
+
+    public String getMessageNoSafeSpot() {
+        return data.messageNoSafeSpot;
+    }
+
+    public String getMessageError() {
+        return data.messageError;
+    }
+
+    public String getMessageTeleported() {
+        return data.messageTeleported;
+    }
+
     private static class ConfigData {
-        int cooldownSeconds = 3600; // 1 hour
+        int cooldownSeconds = 3600;
         int warmupSeconds = 5;
         int minDistance = 5000;
         int maxDistance = 9000;
         double movementThreshold = 0.5;
+        int minHeight = 120;
+        int maxHeight = 200;
+
+        String messageCooldown = "You must wait {time} before using /rtp again!";
+        String messageNoWorld = "You must be in a world to use this command!";
+        String messageWarmupStart = "Teleporting in {seconds} seconds... Don't move!";
+        String messageMovedCancelled = "Teleportation cancelled! You moved too much.";
+        String messageNoSafeSpot = "Could not find a safe landing spot. Try again!";
+        String messageError = "Error scanning for safe location.";
+        String messageTeleported = "Teleported to X: {x}, Y: {y}, Z: {z} ({distance} blocks from spawn)";
     }
 }

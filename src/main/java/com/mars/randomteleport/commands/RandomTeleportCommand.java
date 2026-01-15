@@ -27,40 +27,21 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * Random Teleport Command - Teleports player to a random location 2000-5000
- * blocks from spawn.
- * 
- * Usage: /rtp
- * 
- * @author Mars
- */
 public class RandomTeleportCommand extends AbstractAsyncCommand {
 
     private static final Random random = new Random();
-
-    // Track last teleport time per player
     private final Map<UUID, Long> cooldowns = new HashMap<>();
-
-    // Warmup Manager
     private final WarmupManager warmupManager;
-
-    // Config
     private final RandomTeleportConfig config;
 
-    /**
-     * Constructor - registers the command with name "rtp"
-     */
     public RandomTeleportCommand(RandomTeleportConfig config) {
         super("rtp", "Randomly teleports you away from spawn");
         this.addAliases("randomtp", "randomteleport");
         this.setPermissionGroup(GameMode.Adventure);
-        this.warmupManager = new WarmupManager();
+        this.warmupManager = new WarmupManager(config);
         this.config = config;
     }
 
-    // Ensure we clean up the scheduler when the plugin/command is destroyed (if
-    // applicable lifecycle exists)
     public void cleanup() {
         this.warmupManager.shutdown();
     }
@@ -80,8 +61,6 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
                         return;
 
                     UUID playerUuid = playerRef.getUuid();
-
-                    // Check cooldown
                     long currentTime = System.currentTimeMillis();
                     long cooldownMs = config.getCooldownSeconds() * 1000L;
 
@@ -92,25 +71,19 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
                         if (timePassed < cooldownMs) {
                             long remainingMs = cooldownMs - timePassed;
                             String remainingTime = formatTime(remainingMs);
-                            player.sendMessage(
-                                    Message.raw("You must wait " + remainingTime + " before using /rtp again!"));
+                            String msg = config.getMessageCooldown().replace("{time}", remainingTime);
+                            player.sendMessage(Message.raw(msg));
                             return;
                         }
                     }
 
-                    // Start Warmup
                     warmupManager.startWarmup(playerRef, ref, store, world, config.getWarmupSeconds(), () -> {
-                        // This Runnable will be executed on the scheduler thread after warmup
-                        // We need to be careful about thread safety, but the main teleport logic
-                        // mostly calculates numbers or schedules back to the main thread.
-
-                        // Execute Teleport Logic
                         executeRandomTeleport(player, ref, store, world, playerUuid);
                     });
 
                 }, world);
             } else {
-                player.sendMessage(Message.raw("You must be in a world to use this command!"));
+                player.sendMessage(Message.raw(config.getMessageNoWorld()));
                 return CompletableFuture.completedFuture(null);
             }
         } else {
@@ -120,7 +93,6 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
 
     private void executeRandomTeleport(Player player, Ref<EntityStore> ref, Store<EntityStore> store, World world,
             UUID playerUuid) {
-        // Generate random distance
         int min = config.getMinDistance();
         int max = config.getMaxDistance();
         double distance = min + random.nextDouble() * (max - min);
@@ -129,55 +101,69 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
         double randomX = Math.cos(angle) * distance;
         double randomZ = Math.sin(angle) * distance;
 
-        // Run the chunk loading and teleporting on the main thread/world thread to be
-        // safe
         world.execute(() -> {
-            double teleportY = 85.0; // Fallback
+            double teleportY = -1;
             boolean safeLocationFound = false;
 
-            // Calculate chunk indices
             int chunkX = (int) Math.floor(randomX / 16.0);
             int chunkZ = (int) Math.floor(randomZ / 16.0);
             long chunkIndex = ((long) chunkX << 32) | (chunkZ & 0xFFFFFFFFL);
 
-            // Force load chunk to get height (Allowing unloaded chunks to be safely
-            // targeted)
             try {
                 com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk chunk = world.getChunk(chunkIndex);
+
                 if (chunk != null) {
-                    // Get safe height (Top block)
                     int localX = ((int) randomX) & 15;
                     int localZ = ((int) randomZ) & 15;
-                    // Ensure positive modulo for negative coordinates
                     if (localX < 0)
                         localX += 16;
                     if (localZ < 0)
                         localZ += 16;
 
-                    // Finds the highest block (terrain surface)
-                    int terrainHeight = chunk.getHeight(localX, localZ);
-                    teleportY = terrainHeight + 1.2; // Add invalid buffer
-                    safeLocationFound = true;
+                    int scanStart = config.getMaxHeight();
+                    int scanEnd = config.getMinHeight();
+
+                    for (int y = scanStart; y > scanEnd; y--) {
+                        if (chunk.getFluidId(localX, y, localZ) != 0)
+                            continue;
+
+                        int blockId = chunk.getBlock(localX, y, localZ);
+
+                        if (blockId != 0) {
+                            int block1 = chunk.getBlock(localX, y + 1, localZ);
+                            int block2 = chunk.getBlock(localX, y + 2, localZ);
+                            int block3 = chunk.getBlock(localX, y + 3, localZ);
+
+                            int fluidHead1 = chunk.getFluidId(localX, y + 1, localZ);
+                            int fluidHead2 = chunk.getFluidId(localX, y + 2, localZ);
+                            int fluidHead3 = chunk.getFluidId(localX, y + 3, localZ);
+
+                            boolean headClear = block1 == 0 && block2 == 0 && block3 == 0;
+                            boolean noFluids = fluidHead1 == 0 && fluidHead2 == 0 && fluidHead3 == 0;
+
+                            if (headClear && noFluids) {
+                                teleportY = y + 1.0;
+                                safeLocationFound = true;
+                                break;
+                            }
+                        }
+                    }
                 }
             } catch (Exception e) {
-                player.sendMessage(Message.raw("Error loading target chunk. Using fallback height."));
+                player.sendMessage(Message.raw(config.getMessageError()));
                 e.printStackTrace();
-                teleportY = 120.0;
             }
 
             if (!safeLocationFound) {
-                teleportY = 120.0;
+                player.sendMessage(Message.raw(config.getMessageNoSafeSpot()));
+                return;
             }
 
-            // Get current position component for teleportation
             var transform = store.getComponent(ref, TransformComponent.getComponentType());
             if (transform != null) {
-                // Teleport the player using Vector3d
                 Vector3d targetPosition = new Vector3d(randomX, teleportY, randomZ);
                 transform.teleportPosition(targetPosition);
 
-                // Fix for vertical-only teleportation: Force client sync
-                // Construct the packet using the correct ModelTransform API
                 Position pos = new Position(targetPosition.x, targetPosition.y, targetPosition.z);
                 Direction body = new Direction(0f, 0f, 0f);
                 Direction look = new Direction(0f, 0f, 0f);
@@ -186,19 +172,17 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
                 player.getPlayerConnection().write(new ClientTeleport((byte) 0, modelTransform, true));
             }
 
-            // Set cooldown
             cooldowns.put(playerUuid, System.currentTimeMillis());
 
-            // Notify player
-            player.sendMessage(Message.raw(String.format(
-                    "Teleported to X: %.0f, Y: %.0f, Z: %.0f (%.0f blocks from spawn)",
-                    randomX, teleportY, randomZ, distance)));
+            String msg = config.getMessageTeleported()
+                    .replace("{x}", String.format("%.0f", randomX))
+                    .replace("{y}", String.format("%.0f", teleportY))
+                    .replace("{z}", String.format("%.0f", randomZ))
+                    .replace("{distance}", String.format("%.0f", distance));
+            player.sendMessage(Message.raw(msg));
         });
     }
 
-    /**
-     * Format milliseconds into a readable time string
-     */
     private String formatTime(long milliseconds) {
         long seconds = milliseconds / 1000;
         long minutes = seconds / 60;
@@ -207,13 +191,11 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
         seconds = seconds % 60;
 
         if (hours > 0) {
-            return String.format("%d hour%s %d minute%s",
-                    hours, hours == 1 ? "" : "s",
-                    minutes, minutes == 1 ? "" : "s");
+            return String.format("%d hour%s %d minute%s", hours, hours == 1 ? "" : "s", minutes,
+                    minutes == 1 ? "" : "s");
         } else if (minutes > 0) {
-            return String.format("%d minute%s %d second%s",
-                    minutes, minutes == 1 ? "" : "s",
-                    seconds, seconds == 1 ? "" : "s");
+            return String.format("%d minute%s %d second%s", minutes, minutes == 1 ? "" : "s", seconds,
+                    seconds == 1 ? "" : "s");
         } else {
             return String.format("%d second%s", seconds, seconds == 1 ? "" : "s");
         }
