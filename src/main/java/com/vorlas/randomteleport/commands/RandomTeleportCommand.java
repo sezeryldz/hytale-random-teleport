@@ -94,6 +94,40 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
         return config.getDefaultWarmupSeconds();
     }
 
+    /**
+     * Get the min/max distance for a player based on their permission tier.
+     * Returns int[] {minDistance, maxDistance}
+     */
+    private int[] getDistanceForPlayer(Player player) {
+        // Check tiers from highest to lowest
+        for (Map.Entry<String, RandomTeleportConfig.TierData> entry : config.getTiers().entrySet()) {
+            if (player.hasPermission(entry.getValue().permission, false)) {
+                RandomTeleportConfig.TierData tier = entry.getValue();
+                int minDist = tier.minDistance > 0 ? tier.minDistance : config.getMinDistance();
+                int maxDist = tier.maxDistance > 0 ? tier.maxDistance : config.getMaxDistance();
+                return new int[] { minDist, maxDist };
+            }
+        }
+        // No tier found, use defaults
+        return new int[] { config.getMinDistance(), config.getMaxDistance() };
+    }
+
+    /**
+     * Get the min/max height for a player based on their permission tier.
+     * Returns int[] {minHeight, maxHeight}
+     */
+    private int[] getHeightForPlayer(Player player) {
+        for (Map.Entry<String, RandomTeleportConfig.TierData> entry : config.getTiers().entrySet()) {
+            if (player.hasPermission(entry.getValue().permission, false)) {
+                RandomTeleportConfig.TierData tier = entry.getValue();
+                int minH = tier.minHeight >= 0 ? tier.minHeight : config.getMinHeight();
+                int maxH = tier.maxHeight > 0 ? tier.maxHeight : config.getMaxHeight();
+                return new int[] { minH, maxH };
+            }
+        }
+        return new int[] { config.getMinHeight(), config.getMaxHeight() };
+    }
+
     @NonNullDecl
     @Override
     protected CompletableFuture<Void> executeAsync(CommandContext commandContext) {
@@ -175,8 +209,10 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
                 .replace("{max}", String.valueOf(maxAttempts));
         player.sendMessage(MessageUtil.parseColored(searchMsg));
 
-        int min = config.getMinDistance();
-        int max = config.getMaxDistance();
+        // Get tier-based distance range
+        int[] distanceRange = getDistanceForPlayer(player);
+        int min = distanceRange[0];
+        int max = distanceRange[1];
         double distance = min + random.nextDouble() * (max - min);
         double angle = random.nextDouble() * 2 * Math.PI;
 
@@ -208,7 +244,9 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).thenRun(() -> {
             CompletableFuture.delayedExecutor(500, TimeUnit.MILLISECONDS).execute(() -> {
                 world.execute(() -> {
-                    int safeY = findSafeSurfaceY(world, worldX, worldZ);
+                    // Get tier-based height range
+                    int[] heightRange = getHeightForPlayer(player);
+                    int safeY = findSafeSurfaceY(world, worldX, worldZ, heightRange[0], heightRange[1]);
 
                     if (safeY < 0) {
                         // Try another location
@@ -257,10 +295,8 @@ public class RandomTeleportCommand extends AbstractAsyncCommand {
      * 
      * @return Y coordinate of ground block, or -1 if no safe spot found
      */
-    private int findSafeSurfaceY(World world, int x, int z) {
-        int maxHeight = 255;
-
-        for (int y = maxHeight; y >= 0; y--) {
+    private int findSafeSurfaceY(World world, int x, int z, int minHeight, int maxHeight) {
+        for (int y = maxHeight; y >= minHeight; y--) {
             try {
                 int ground = world.getBlock(x, y, z);
                 // Check: solid ground + 2 blocks of AIR headspace (no blocks AND no fluids)

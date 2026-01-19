@@ -144,6 +144,10 @@ public class RandomTeleportConfig {
         public String permission = "";
         public int cooldownSeconds = 600;
         public int warmupSeconds = 5;
+        public int minDistance = -1; // -1 = use defaults
+        public int maxDistance = -1;
+        public int minHeight = -1;
+        public int maxHeight = -1;
     }
 
     private static class PermissionsData {
@@ -159,7 +163,7 @@ public class RandomTeleportConfig {
         int maxDistance = 9000;
         double movementThreshold = 0.5;
         int minHeight = 120;
-        int maxHeight = 200;
+        int maxHeight = 260;
         int maxAttempts = 10;
     }
 
@@ -177,7 +181,7 @@ public class RandomTeleportConfig {
 
     private static class ConfigData {
         String pluginName = "RandomTeleport";
-        String version = "1.0.3";
+        String version = "1.1.0";
         boolean debugMode = false;
         PermissionsData permissions = new PermissionsData();
         Map<String, TierData> tiers = createDefaultTiers();
@@ -191,24 +195,40 @@ public class RandomTeleportConfig {
             diamond.permission = "randomteleport.tier.diamond";
             diamond.cooldownSeconds = 300;
             diamond.warmupSeconds = 1;
+            diamond.minDistance = 8000;
+            diamond.maxDistance = 15000;
+            diamond.minHeight = 120;
+            diamond.maxHeight = 260;
             tiers.put("diamond", diamond);
 
             TierData gold = new TierData();
             gold.permission = "randomteleport.tier.gold";
             gold.cooldownSeconds = 900;
             gold.warmupSeconds = 2;
+            gold.minDistance = 6000;
+            gold.maxDistance = 12000;
+            gold.minHeight = 120;
+            gold.maxHeight = 260;
             tiers.put("gold", gold);
 
             TierData silver = new TierData();
             silver.permission = "randomteleport.tier.silver";
             silver.cooldownSeconds = 1800;
             silver.warmupSeconds = 3;
+            silver.minDistance = 4000;
+            silver.maxDistance = 9000;
+            silver.minHeight = 120;
+            silver.maxHeight = 260;
             tiers.put("silver", silver);
 
             TierData bronze = new TierData();
             bronze.permission = "randomteleport.tier.bronze";
             bronze.cooldownSeconds = 2700;
             bronze.warmupSeconds = 5;
+            bronze.minDistance = 3000;
+            bronze.maxDistance = 6000;
+            bronze.minHeight = 120;
+            bronze.maxHeight = 260;
             tiers.put("bronze", bronze);
 
             return tiers;
